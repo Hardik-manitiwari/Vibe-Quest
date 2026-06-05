@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Vibe Quest: Pro Edition</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;700&family=Bangers&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            background: #0f172a;
+            font-family: 'Fredoka', sans-serif;
+            overflow: hidden;
+            position: fixed;
+            width: 100%; height: 100%;
+            color: #fff;
+        }
+
+        canvas { display: block; touch-action: none; }
+
+        #ui {
+            position: absolute; top: 10px; width: 100%;
+            display: flex; flex-direction: column; align-items: center;
+            padding: 0 20px; pointer-events: none; z-index: 5;
+        }
+
+        #stats { width: 100%; display: flex; justify-content: space-between; font-size: 22px; font-family: 'Bangers'; letter-spacing: 1px; }
+
+        #progress-container {
+            width: 100%; height: 14px; background: rgba(255,255,255,0.1);
+            border-radius: 10px; margin-top: 10px; overflow: hidden; border: 2px solid rgba(255,255,255,0.1);
+        }
+
+        #progress-bar { width: 0%; height: 100%; background: linear-gradient(90deg, #00d2ff, #3a7bd5); transition: width 0.3s ease; }
+
+        #overlay {
+            position: absolute; inset: 0;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(5px);
+            display: flex; justify-content: center; align-items: center; z-index: 10;
+        }
+
+        .card {
+            background: #1e293b; padding: 40px 30px; border-radius: 30px;
+            text-align: center; width: 85%; border: 3px solid #00d2ff;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        }
+
+        h1 { font-family: 'Bangers'; font-size: 42px; margin-bottom: 10px; color: #00d2ff; text-shadow: 2px 2px #e94560; }
+        p { font-size: 18px; margin-bottom: 25px; color: #cbd5e1; line-height: 1.4; }
+
+        button {
+            background: #e94560; color: white; border: none;
+            padding: 15px 40px; border-radius: 50px; font-size: 24px;
+            font-family: 'Bangers'; cursor: pointer; transition: transform 0.1s;
+            box-shadow: 0 5px 0 #a02d41;
+        }
+        button:active { transform: translateY(3px); box-shadow: 0 2px 0 #a02d41; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div id="stats">
+        <div id="day-display">READY?</div>
+        <div id="lives-display">❤️❤️❤️</div>
+    </div>
+    <div id="progress-container"><div id="progress-bar"></div></div>
+</div>
+
+<div id="overlay">
+    <div class="card" id="modal">
+        <h1 id="m-title">VIBE QUEST</h1>
+        <p id="m-desc">The week is starting. Stay positive!</p>
+        <button id="m-btn" onclick="startCurrentLevel()">START MISSION</button>
+    </div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const progBar = document.getElementById('progress-bar');
+    const dayDisp = document.getElementById('day-display');
+    const livesDisp = document.getElementById('lives-display');
+    const overlay = document.getElementById('overlay');
+
+    // Game Config
+    let gameActive = false;
+    let currentDayIndex = 0;
+    let lives = 3;
+    let shake = 0;
+    let levelProgress = 0;
+    let items = [];
+
+    const days = [
+        { name: "MONDAY", speed: 4, spawn: 0.03, goal: 100, desc: "Monday Blues: Fast-paced emails incoming. Grab coffee, avoid meetings!" },
+        { name: "TUESDAY", speed: 5.5, spawn: 0.04, goal: 120, desc: "Tuesday Grind: The workload is stacking up. Stay focused!" },
+        { name: "WEDNESDAY", speed: 7, spawn: 0.05, goal: 150, desc: "Hump Day: You're halfway there! Watch out for mid-week burnout." },
+        { name: "THURSDAY", speed: 8.5, spawn: 0.06, goal: 180, desc: "Pre-Friday: Deadlines are approaching. Keep the vibes high!" },
+        { name: "FRIDAY", speed: 11, spawn: 0.08, goal: 200, desc: "Friday Frenzy: Final push before freedom. Catch the weekend vibes!" }
+    ];
+
+    const player = { x: 0, y: 0, w: 90, h: 90, img: new Image() };
+    player.img.src = 'gf_photo.png'; // Fallback to circle if missing
+
+    const itemsList = {
+        good: ['🎮', '🍕', '☕', '🎧', '🥑', '✨', '🧘'],
+        bad: ['⏰', '📉', '📑', '🚧', '📧', '💣']
+    };
+
+    function resize() {
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = window.innerWidth * dpr;
+        canvas.height = window.innerHeight * dpr;
+        ctx.scale(dpr, dpr);
+        canvas.style.width = window.innerWidth + 'px';
+        canvas.style.height = window.innerHeight + 'px';
+
+        player.y = window.innerHeight - 150;
+        player.x = window.innerWidth / 2 - player.w / 2;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Touch Handling
+    canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        let touchX = e.touches[0].clientX;
+        player.x = touchX - player.w / 2;
+        player.x = Math.max(0, Math.min(window.innerWidth - player.w, player.x));
+    }, {passive: false});
+
+    // Level Management
+    function startCurrentLevel() {
+        overlay.style.display = 'none';
+        levelProgress = 0;
+        items = [];
+        progBar.style.width = "0%";
+        dayDisp.innerText = days[currentDayIndex].name;
+        gameActive = true;
+        requestAnimationFrame(loop);
+    }
+
+    function showLevelDefinition() {
+        gameActive = false;
+        const day = days[currentDayIndex];
+        overlay.style.display = 'flex';
+        document.getElementById('m-title').innerText = day.name;
+        document.getElementById('m-desc').innerText = day.desc;
+        document.getElementById('m-btn').innerText = "LET'S GO 🚀";
+    }
+
+    function spawnItem() {
+        const day = days[currentDayIndex];
+        const isBad = Math.random() < 0.4;
+        items.push({
+            x: Math.random() * (window.innerWidth - 60) + 30,
+            y: -50,
+            text: isBad ? itemsList.bad[Math.floor(Math.random()*itemsList.bad.length)] : itemsList.good[Math.floor(Math.random()*itemsList.good.length)],
+            isBad: isBad,
+            speed: day.speed + (Math.random() * 2)
+        });
+    }
+
+    function loop() {
+        if(!gameActive) return;
+
+        ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+        // Background Gradient
+        let grad = ctx.createLinearGradient(0, 0, 0, window.innerHeight);
+        grad.addColorStop(0, '#0f172a');
+        grad.addColorStop(1, '#1e293b');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+
+        // Screen Shake
+        let ox = 0, oy = 0;
+        if(shake > 0) {
+            ox = (Math.random()-0.5)*shake;
+            oy = (Math.random()-0.5)*shake;
+            shake *= 0.85;
+        }
+
+        // Draw Player
+        ctx.save();
+        ctx.translate(ox, oy);
+        ctx.beginPath();
+        ctx.arc(player.x + player.w/2, player.y + player.h/2, player.w/2, 0, Math.PI*2);
+        ctx.clip();
+
+        if (player.img.complete && player.img.naturalWidth !== 0) {
+            ctx.drawImage(player.img, player.x, player.y, player.w, player.h);
+        } else {
+            ctx.fillStyle = "#00d2ff";
+            ctx.fillRect(player.x, player.y, player.w, player.h);
+        }
+        ctx.restore();
+
+        // Spawn Logic
+        if(Math.random() < days[currentDayIndex].spawn) spawnItem();
+
+        // Items Logic
+        ctx.textAlign = "center";
+        for(let i = items.length - 1; i >= 0; i--) {
+            let it = items[i];
+            it.y += it.speed;
+
+            ctx.font = "45px Arial";
+            ctx.fillText(it.text, it.x, it.y);
+
+            // Collision
+            let dx = it.x - (player.x + player.w/2);
+            let dy = it.y - (player.y + player.h/2);
+            let dist = Math.sqrt(dx*dx + dy*dy);
+
+            if(dist < 50) {
+                if(it.isBad) {
+                    lives--;
+                    shake = 15;
+                    livesDisp.innerText = "❤️".repeat(Math.max(0, lives)) || "😵";
+                    if(lives <= 0) return endGame("GAME OVER", "The work week won this time...");
+                } else {
+                    levelProgress += 10;
+                    progBar.style.width = (levelProgress / days[currentDayIndex].goal * 100) + "%";
+
+                    if(levelProgress >= days[currentDayIndex].goal) {
+                        currentDayIndex++;
+                        if(currentDayIndex >= days.length) {
+                            return endGame("WEEKEND REACHED!", "You survived the grind! Time to relax. 🎉");
+                        } else {
+                            return showLevelDefinition();
+                        }
+                    }
+                }
+                items.splice(i, 1);
+            }
+            if(it.y > window.innerHeight + 50) items.splice(i, 1);
+        }
+        requestAnimationFrame(loop);
+    }
+
+    function endGame(t, d) {
+        gameActive = false;
+        overlay.style.display = 'flex';
+        document.getElementById('m-title').innerText = t;
+        document.getElementById('m-desc').innerText = d;
+        document.getElementById('m-btn').innerText = "RESTART WEEK";
+        document.getElementById('m-btn').onclick = () => location.reload();
+    }
+
+    // Initialize
+    showLevelDefinition();
+</script>
+</body>
+</html>
